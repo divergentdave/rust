@@ -25,8 +25,8 @@ use super::{
 };
 
 macro_rules! throw_validation_failure {
-    ($where:expr, { $( $what_fmt:expr ),+ } $( expected { $( $expected_fmt:expr ),+ } )?) => {{
-        let msg = rustc_middle::ty::print::with_no_trimmed_paths(|| {
+    ($where:expr, { $( $what_fmt:expr ),+ } $( expected { $( $expected_fmt:expr ),+ } )? $( miri_extra { $( $miri_extra:expr ),+ } )? ) => {{
+        let (msg, miri_extra) = rustc_middle::ty::print::with_no_trimmed_paths(|| {
             let mut msg = String::new();
             msg.push_str("encountered ");
             write!(&mut msg, $($what_fmt),+).unwrap();
@@ -40,9 +40,15 @@ macro_rules! throw_validation_failure {
                 write!(&mut msg, $($expected_fmt),+).unwrap();
             )?
 
-            msg
+            #[allow(unused_mut, unused_assignments)]
+            let mut miri_extra = None;
+            $(
+                miri_extra = Some(format!($($miri_extra),+));
+            )?
+
+            (msg, miri_extra)
         });
-        throw_ub!(ValidationFailure(msg))
+        throw_ub!(ValidationFailure(Box::new((msg, miri_extra))))
     }};
 }
 
@@ -77,7 +83,7 @@ macro_rules! throw_validation_failure {
 ///
 macro_rules! try_validation {
     ($e:expr, $where:expr,
-     $( $( $p:pat )|+ => { $( $what_fmt:expr ),+ } $( expected { $( $expected_fmt:expr ),+ } )? ),+ $(,)?
+     $( $( $p:pat )|+ => { $( $what_fmt:expr ),+ } $( expected { $( $expected_fmt:expr ),+ } )? $( miri_extra { $( $miri_extra_fmt:expr ),+ } )? ),+ $(,)?
     ) => {{
         match $e {
             Ok(x) => x,
@@ -86,7 +92,7 @@ macro_rules! try_validation {
             $( $( Err(InterpErrorInfo { kind: $p, .. }) )|+ =>
                 throw_validation_failure!(
                     $where,
-                    { $( $what_fmt ),+ } $( expected { $( $expected_fmt ),+ } )?
+                    { $( $what_fmt ),+ } $( expected { $( $expected_fmt ),+ } )? $( miri_extra { $( $miri_extra_fmt ),+ } )?
                 ),
             )+
             #[allow(unreachable_patterns)]
@@ -414,8 +420,8 @@ impl<'rt, 'mir, 'tcx: 'mir, M: Machine<'mir, 'tcx>> ValidityVisitor<'rt, 'mir, '
                 { "a dangling {} (created from integer)", kind },
             // This cannot happen during const-eval (because interning already detects
             // dangling pointers), but it can happen in Miri.
-            err_ub!(PointerUseAfterFree(..)) =>
-                { "a dangling {} (use-after-free)", kind },
+            err_ub!(PointerUseAfterFree(alloc_id)) =>
+                { "a dangling {} (use-after-free)", kind } miri_extra { "the dangling {} points to {:?}", kind, alloc_id },
         );
         // Recursive checking
         if let Some(ref mut ref_tracking) = self.ref_tracking_for_consts {

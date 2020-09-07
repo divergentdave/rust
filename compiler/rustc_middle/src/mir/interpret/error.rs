@@ -220,7 +220,9 @@ pub enum UndefinedBehaviorInfo<'tcx> {
     /// The value validity check found a problem.
     /// Should only be thrown by `validity.rs` and always point out which part of the value
     /// is the problem.
-    ValidationFailure(String),
+    ///
+    /// The second `String`, when present, holds extra diagnostic information meant for Miri.
+    ValidationFailure(Box<(String, Option<String>)>),
     /// Using a non-boolean `u8` as bool.
     InvalidBool(u8),
     /// Using a non-character `u32` as character.
@@ -291,7 +293,7 @@ impl fmt::Display for UndefinedBehaviorInfo<'_> {
             ),
             WriteToReadOnly(a) => write!(f, "writing to {} which is read-only", a),
             DerefFunctionPointer(a) => write!(f, "accessing {} which contains a function", a),
-            ValidationFailure(ref err) => write!(f, "type validation failed: {}", err),
+            ValidationFailure(box (ref err, _)) => write!(f, "type validation failed: {}", err),
             InvalidBool(b) => {
                 write!(f, "interpreting an invalid 8-bit value as a bool: 0x{:02x}", b)
             }
